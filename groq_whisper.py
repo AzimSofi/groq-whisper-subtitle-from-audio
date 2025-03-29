@@ -214,10 +214,38 @@ def create_combined_srt_gui():
                 status_label.config(text="No SRT files were generated from segments. Transcription failed for all segments.")
                 messagebox.showerror("Error", "No SRT files generated from segments. Transcription failed for all segments.")
 
+            # --- Auto-Delete and Filename ---
+            if auto_delete_var.get():
+                status_label.config(text="Deleting segmented audio and SRT files...")
+                window.update()
+                for audio_file in segmented_audio_files:
+                    try:
+                        os.remove(audio_file)
+                    except Exception as e:
+                        print(f"Error deleting {audio_file}: {e}")
+                try:
+                    os.remove(large_audio_filepath)
+                except Exception as e:
+                    print(f"Error deleting {large_audio_filepath}: {e}")
+                for srt_file in generated_srt_files:
+                    try:
+                        os.remove(srt_file)
+                    except Exception as e:
+                        print(f"Error deleting {srt_file}: {e}")
+
+            output_filename = output_filename_entry.get() + ".srt"
+            output_filepath = os.path.join(output_dir, output_filename)
+            try:
+                os.rename(os.path.join(output_dir, "combined_audio.srt"), output_filepath)
+                status_label.config(text=f"Successfully segmented, transcribed and combined SRT files into: {output_filepath}")
+                messagebox.showinfo("Success", f"Audio segmented, SRTs generated and combined to: {output_filepath}")
+            except FileNotFoundError as e:
+                status_label.config(text=f"Error: combined_audio.srt not found. Check console for details. {e}")
+                messagebox.showerror("Error", f"Failed to rename combined_audio.srt. Check console for details. {e}")
 
         except subprocess.CalledProcessError as e:
-            status_label.config(text=f"FFmpeg segmentation error: {e.stderr.decode()}") # Decode stderr for error message
-            messagebox.showerror("FFmpeg Error", f"Audio segmentation with FFmpeg failed. See status for details.  Ensure FFmpeg is installed and in your system's PATH.")
+            status_label.config(text=f"FFmpeg segmentation error: {e.stderr.decode()}")  # Decode stderr for error message
+            messagebox.showerror("FFmpeg Error", f"Audio segmentation with FFmpeg failed. See status for details. Ensure FFmpeg is installed and in your system's PATH.")
         except FileNotFoundError:
             status_label.config(text="Error: FFmpeg command not found. Please ensure FFmpeg is installed and added to your system's PATH.")
             messagebox.showerror("Error", "FFmpeg Not Found", "FFmpeg command not found. Please install FFmpeg and ensure it's in your system's PATH.")
@@ -298,6 +326,18 @@ def create_combined_srt_gui():
     segment_process_button = tk.Button(large_audio_tab, text="Segment & Process Large Audio to SRT", command=segment_and_process)
     segment_process_button.pack(pady=10)
 
+    # --- Auto-Delete Checkbox ---
+    auto_delete_var = tk.BooleanVar(value=False)
+    auto_delete_check = tk.Checkbutton(large_audio_tab, text="Auto-Delete Audio Segments and Original Audio", variable=auto_delete_var)
+    auto_delete_check.pack(pady=5)
+
+    # --- Output Filename Entry ---
+    output_filename_label = tk.Label(large_audio_tab, text="Output Filename:")
+    output_filename_label.pack()
+    output_filename_entry = tk.Entry(large_audio_tab, width=30)
+    output_filename_entry.insert(0, "combined_audio")  # Default filename
+    output_filename_entry.pack(pady=5)
+
     # --- Segmented Audio Files Tab ---
     segmented_audio_tab = tk.Frame(notebook)
     notebook.add(segmented_audio_tab, text="Segmented Audio Files")
@@ -310,6 +350,18 @@ def create_combined_srt_gui():
 
     process_combine_button = tk.Button(segmented_audio_tab, text="Process & Combine Selected to SRT", command=process_and_combine_selected)
     process_combine_button.pack(pady=10)
+
+    # --- Auto-Delete Checkbox ---
+    auto_delete_var2 = tk.BooleanVar(value=False)
+    auto_delete_check2 = tk.Checkbutton(segmented_audio_tab, text="Auto-Delete Audio Segments and Original Audio", variable=auto_delete_var2)
+    auto_delete_check2.pack(pady=5)
+
+    # --- Output Filename Entry ---
+    output_filename_label2 = tk.Label(segmented_audio_tab, text="Output Filename:")
+    output_filename_label2.pack()
+    output_filename_entry2 = tk.Entry(segmented_audio_tab, width=30)
+    output_filename_entry2.insert(0, "combined_audio")  # Default filename
+    output_filename_entry2.pack(pady=5)
 
     status_label = tk.Label(window, text="")
     status_label.pack(pady=10)
