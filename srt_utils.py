@@ -1,145 +1,94 @@
+# srt_utils.py
 import re
 import io
 import os
 
-
 def parse_srt(srt_string):
     """Parses an SRT string into a list of subtitle entry dictionaries."""
     entries = []
+    # More robust pattern: handles optional spaces, different line endings
     pattern = re.compile(
-        r'(\d+)\s*'  # Index
-        r'(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})\s*'  # Timestamps
-        r'([\s\S]*?)\s*'  # Text (non-greedy match until next block or end)
-        r'(?=\n\n\d+|\Z)', # Lookahead for blank line + next index or end of string
+        r'(\d+)\r?\n'
+        r'(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})\r?\n'
+        r'([\s\S]*?)\r?\n\r?\n',  # Match text until a blank line
         re.MULTILINE
     )
-    for match in pattern.finditer(srt_string.strip()):
+    # Add a check for potential final entry without double newline
+    if not srt_string.strip().endswith('\n\n'):
+        srt_string += '\n\n'
+
+    for match in pattern.finditer(srt_string):
         try:
             index = int(match.group(1))
             start_time = match.group(2)
             end_time = match.group(3)
-            text = match.group(4).strip()
-            entries.append({
-                'index': index,
-                'start': start_time,
-                'end': end_time,
-                'text': text
-            })
+            text = match.group(4).strip() # Strip leading/trailing whitespace from text block
+            if text: # Only add if text is not empty
+                entries.append({
+                    'index': index,
+                    'start': start_time,
+                    'end': end_time,
+                    'text': text
+                })
         except Exception as e:
-            print(f"Warning: Skipping potentially malformed block near index {match.group(1)} due to error: {e}")
-            # Optionally add more robust error handling or logging here
+            print(f"Warning: Skipping potentially malformed block near index {match.group(1) if match.group(1) else '?'} due to error: {e}")
+            # Attempt to find the start of the block for logging
+            # block_start = match.start()
+            # print(f"Problematic block content preview:\n---\n{srt_string[block_start:block_start+100]}\n---")
     return entries
 
 def merge_subtitles(entries, min_chars=45):
-    """Merges consecutive subtitle entries based on minimum character count."""
+    """
+    Merges consecutive subtitle entries if the *first* entry's text
+    is shorter than min_chars. Appends text and extends end time.
+    """
     if not entries:
         return []
 
     merged_entries = []
-    current_block = None
+    i = 0
+    while i < len(entries):
+        current_entry = entries[i].copy() # Work with a copy
 
-    for entry in entries:
-        if current_block is None:
-            # Start the first block
-            current_block = {
-                'start': entry['start'],
-                'end': entry['end'],
-                'text': entry['text'],
-                'char_count': len(entry['text'])
-            }
-        else:
-            # Get text to add (could be empty)
-            text_to_add = entry['text']
-            current_text_len = current_block['char_count']
-            
-            # Decide whether to merge based on the *current* block's length
-            if current_text_len < min_chars:
-                # Merge this entry into the current block regardless of the added length
-                combined_text = current_block['text'] + text_to_add
-                current_block['end'] = entry['end']
-                current_block['text'] = combined_text
-                current_block['char_count'] = len(combined_text) # Update count
-            else:
-                # Current block was already long enough. Finalize it.
-                merged_entries.append({
-                    'start': current_block['start'],
-                    'end': entry['end'],
-                    'text': current_block['text']
-                })
-                # Start a new block with the current entry
-                current_block = {
-                    'start': entry['start'],
-                    'end': entry['end'],
-                    'text': text_to_add,
-                    'char_count': len(text_to_add)
-                }
+        # Check if we need to merge based on current entry's length
+        while len(current_entry['text']) < min_chars and (i + 1) < len(entries):
+            # Merge with the next entry
+            next_entry = entries[i + 1]
+            # Append text with a space if needed (optional, adjust if you prefer no space)
+            if current_entry['text'] and next_entry['text']:
+                 current_entry['text'] += " " + next_entry['text']
+            else: # Handle cases where one text might be empty initially
+                 current_entry['text'] += next_entry['text']
 
-    # Add the last remaining block (handle leftovers)
-    if current_block:
-        merged_entries.append({
-            'start': current_block['start'],
-            'end': current_block['end'],
-            'text': current_block['text']
-        })
+            current_entry['end'] = next_entry['end'] # Update end time to the end of the merged block
+            i += 1 # Move index past the merged entry
+
+        merged_entries.append(current_entry)
+        i += 1 # Move to the next entry to evaluate
 
     return merged_entries
+
 
 def format_srt(merged_entries):
     """Formats a list of merged entries back into an SRT string."""
     output = io.StringIO()
     for i, entry in enumerate(merged_entries, 1):
+        # Ensure start/end times are strings in the correct format (they should be)
+        start_time = entry.get('start', '00:00:00,000')
+        end_time = entry.get('end', '00:00:00,000')
+        text = entry.get('text', '').strip() # Ensure text is stripped
+
+        if not text: # Skip entries with no text after potential merging/stripping
+             continue
+
         output.write(str(i) + '\n')
-        output.write(f"{entry['start']} --> {entry['end']}\n")
+        output.write(f"{start_time} --> {end_time}\n")
         # Ensure text doesn't end with multiple newlines before the blank line
-        output.write(entry['text'].strip() + '\n\n')
+        output.write(text + '\n\n') # Write text and the required blank line
+
     # Use rstrip to remove only trailing whitespace/newlines from the whole string
-    return output.getvalue().rstrip() + '\n'  # Ensure single trailing newline
-
-
-def combine_srt_files(srt_files, output_dir):
-    """Combines a list of SRT files into a single SRT file in output_dir."""
-    if not srt_files:
-        print("No SRT files to combine.")
-        return None
-
-    # Sort assuming filenames contain '_min' and segment number, otherwise maintain order
-    def get_segment_number(filename):
-        if '_min' in filename:
-            try:
-                return int(os.path.basename(filename).split('_min')[1].split('.')[0])
-            except ValueError:
-                return float('inf')  # Put files without valid segment numbers at the end
-        return float('inf')  # For files not matching naming convention, keep original order if not sortable
-
-    srt_files.sort(key=get_segment_number)
-
-    output_filepath = os.path.join(output_dir, "combined_audio.srt")
-
-    try:
-        with open(output_filepath, 'w', encoding='utf-8') as outfile:
-            subtitle_index = 1
-            for srt_filepath in srt_files:
-                if not srt_filepath:
-                    continue
-                with open(srt_filepath, 'r', encoding='utf-8') as infile:
-                    lines = infile.readlines()
-                    i = 0
-                    while i < len(lines):
-                        line = lines[i].strip()
-                        if line.isdigit() and int(line) > 0:
-                            outfile.write(str(subtitle_index) + '\n')
-                            subtitle_index += 1
-                            i += 1
-                            outfile.write(lines[i])
-                            i += 1
-                            while i < len(lines) and lines[i].strip() != "":
-                                outfile.write(lines[i])
-                                i += 1
-                            outfile.write('\n')
-                            i += 1
-                        else:
-                            i += 1
-        return output_filepath
-    except Exception as e:
-        print(f"Error combining SRT files: {e}")
-        return None
+    # Add one newline at the end for POSIX compliance if desired, but SRT usually just ends after the last blank line.
+    final_srt = output.getvalue().rstrip()
+    if final_srt: # Add trailing newline only if there's content
+        final_srt += '\n'
+    return final_srt
