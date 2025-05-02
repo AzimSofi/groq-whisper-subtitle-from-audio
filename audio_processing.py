@@ -56,10 +56,10 @@ def process_audio_segment(audio_filepath, output_dir, model_name="whisper-large-
         with open(audio_filepath, "rb") as audio_file:
             # Note: Groq API might expect filename in the tuple
             files = {"file": (os.path.basename(audio_filepath), audio_file, "audio/mpeg")} # Added filename and mimetype
-            transcript = client.speech.transcriptions.create(
+            transcript = client.audio.transcriptions.create(
                 model=model_name,
                 file=files["file"],
-                language="en",
+                language="ja",
                 response_format="srt"
             )
 
